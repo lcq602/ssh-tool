@@ -1,0 +1,13 @@
+# 普通 Linux 命令：逐行执行
+cd /home/project/FundValuation
+ls -la
+
+# 上传文件：upload 本地文件路径 远程文件路径
+# 如果本地路径包含空格，请加双引号
+# upload "D:\build output\app.jar" /home/project/FundValuation/app.jar
+
+# 示例部署流程：
+# ./start.sh stop
+# ./start.sh backup
+# upload D:\build\FundValuation.jar /home/project/FundValuation/FundValuation.jar
+# ./start.sh start

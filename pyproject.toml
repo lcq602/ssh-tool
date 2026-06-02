@@ -1,0 +1,26 @@
+[project]
+name = "ssh-tool"
+version = "0.1.0"
+description = "Run configured SSH commands and file uploads from Windows."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "paramiko>=5.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+    "pyinstaller>=6.0.0",
+]
+
+[project.scripts]
+ssh-tool = "ssh_tool.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
