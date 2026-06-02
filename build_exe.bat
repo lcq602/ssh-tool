@@ -16,7 +16,9 @@ if errorlevel 1 (
 )
 
 if exist dist\config rmdir /s /q dist\config
-xcopy config dist\config\ /e /i /y >nul
+mkdir dist\config
+copy config\ssh.example.json dist\config\ssh.example.json >nul
+copy config\operations.txt dist\config\operations.txt >nul
 
 echo.
 echo Build complete: dist\ssh-tool.exe

@@ -44,3 +44,4 @@ venv.bak/
 
 # Project specific
 uv.lock
+config/ssh.json
