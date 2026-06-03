@@ -17,7 +17,10 @@ class SshRemote:
     def __enter__(self) -> "SshRemote":
         client = paramiko.SSHClient()
         client.load_system_host_keys()
-        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        if self.config.auto_accept_key:
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        else:
+            client.set_missing_host_key_policy(paramiko.RejectPolicy())
         client.connect(
             hostname=self.config.host,
             port=self.config.port,

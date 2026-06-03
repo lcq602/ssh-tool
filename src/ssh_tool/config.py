@@ -19,6 +19,7 @@ class SshConfig:
     target_os: TargetOs = "linux"
     output_encoding: str = "auto"
     timeout: int = 30
+    auto_accept_key: bool = False
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ def load_ssh_config(path: Path) -> SshConfig:
         target_os=target_os,  # type: ignore[arg-type]
         output_encoding=str(data.get("output_encoding", "auto")).lower(),
         timeout=int(data.get("timeout", 30)),
+        auto_accept_key=bool(data.get("auto_accept_key", False)),
     )
 
 
