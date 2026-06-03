@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-uv run pyinstaller ^
+.venv\Scripts\python.exe -m PyInstaller ^
   --clean ^
   --onefile ^
   --noconsole ^
