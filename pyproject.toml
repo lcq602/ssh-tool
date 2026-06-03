@@ -16,6 +16,7 @@ dev = [
 
 [project.scripts]
 ssh-tool = "ssh_tool.main:main"
+ssh-tool-gui = "ssh_tool.flow_gui:main"
 
 [build-system]
 requires = ["hatchling"]

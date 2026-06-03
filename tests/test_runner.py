@@ -83,3 +83,50 @@ def test_runner_resolves_relative_windows_cd() -> None:
     assert remote.commands == [
         'cd /d "C:\\deploy\\FundValuation" && dir',
     ]
+
+
+def test_runner_waits_for_each_command_before_starting_next() -> None:
+    events: list[str] = []
+
+    class OrderedRemote:
+        def run(self, command: str) -> int:
+            events.append(f"start:{command}")
+            events.append(f"finish:{command}")
+            return 0
+
+        def upload(self, local_path: Path, remote_path: str) -> None:
+            events.append(f"upload:{remote_path}")
+
+    runner = OperationRunner(OrderedRemote(), target_os="linux")
+
+    runner.run_all(
+        [
+            CommandOperation("echo one", 1),
+            CommandOperation("echo two", 2),
+        ]
+    )
+
+    assert events == [
+        "start:echo one",
+        "finish:echo one",
+        "start:echo two",
+        "finish:echo two",
+    ]
+
+
+def test_runner_sends_progress_to_output_callback() -> None:
+    messages: list[str] = []
+    remote = FakeRemote()
+    runner = OperationRunner(remote, target_os="linux", output=messages.append)
+
+    runner.run_all(
+        [
+            CommandOperation("cd /home/project/app", 1),
+            CommandOperation("ls -la", 2),
+        ]
+    )
+
+    assert messages == [
+        "[line 1] current directory: /home/project/app",
+        "[line 2] $ cd /home/project/app && ls -la",
+    ]

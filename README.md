@@ -141,8 +141,11 @@ logs\run-YYYYMMDD-HHMMSS.log
 如果执行失败，控制台会显示：
 
 ```text
-ERROR: 失败原因
-Log written to: logs\run-YYYYMMDD-HHMMSS.log
++----------------------------------------------------------------------+
+| SSH Tool                                                             |
++----------------------------------------------------------------------+
+[FAIL] 失败原因
+[LOG ] logs\run-YYYYMMDD-HHMMSS.log
 ```
 
 日志文件会记录失败原因和 Python 堆栈，方便定位是连接失败、认证失败、文件不存在、上传失败，还是远程命令返回非 0。
@@ -158,6 +161,26 @@ uv run ssh-tool
 ```text
 run.bat
 ```
+
+## 图形化编辑 operations.txt
+
+运行 GUI：
+
+```powershell
+uv run ssh-tool-gui
+```
+
+也可以双击：
+
+```text
+run_gui.bat
+```
+
+GUI 支持在画布上添加命令块和上传块，拖动控件调整位置，通过 `连接箭头` 按钮创建箭头。点击 `写入 operations.txt` 后，会按从 `Start` 节点开始的箭头顺序写入 `config/operations.txt`。
+
+GUI 底部提供执行输出窗口。点击 `运行流程` 会先写入 `config/operations.txt`，再读取 `config/ssh.json` 连接服务器并执行流程。输出窗口会实时显示连接状态、每条命令、远程输出和错误信息。
+
+当前流程图是线性执行模型：每个节点最多只能有一个入口和一个出口，不支持分支并行。命令执行仍由命令行执行器逐条执行，上一条命令或上传完成后才会进入下一条。
 
 ## 测试
 
@@ -183,5 +206,6 @@ build_exe.bat
 
 ```text
 dist\ssh-tool.exe
+dist\ssh-tool-gui.exe
 dist\config\
 ```

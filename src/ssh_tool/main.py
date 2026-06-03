@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from ssh_tool.console_output import ConsoleOutput
 from ssh_tool.config import load_operations, load_ssh_config
 from ssh_tool.logging_utils import append_log, create_log_file, write_failure_log
 from ssh_tool.remote import SshRemote
@@ -17,29 +18,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-pause", action="store_true", help="Do not wait for Enter before exit.")
     args = parser.parse_args(argv)
     log_path = create_log_file(Path.cwd())
+    console = ConsoleOutput()
 
     try:
+        console.header("SSH Tool")
         append_log(log_path, "SSH Tool started.")
         ssh_config_path = Path(args.ssh_config)
         operations_path = Path(args.operations)
         ssh_config = load_ssh_config(ssh_config_path)
         operations = load_operations(operations_path)
 
-        print(
-            f"Connecting to {ssh_config.username}@{ssh_config.host}:{ssh_config.port} "
-            f"({ssh_config.target_os}) ..."
-        )
+        console.connection(ssh_config.username, ssh_config.host, ssh_config.port, ssh_config.target_os)
         append_log(log_path, f"Connecting to {ssh_config.username}@{ssh_config.host}:{ssh_config.port} ({ssh_config.target_os})")
-        with SshRemote(ssh_config) as remote:
-            runner = OperationRunner(remote, target_os=ssh_config.target_os)
+        with SshRemote(ssh_config, output=console.remote) as remote:
+            runner = OperationRunner(remote, target_os=ssh_config.target_os, output=console.line)
             runner.run_all(operations)
-        print("All operations completed.")
+        console.success("All operations completed.")
         append_log(log_path, "All operations completed.")
         return 0
     except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
         write_failure_log(log_path, exc)
-        print(f"Log written to: {log_path}", file=sys.stderr)
+        console.error(str(exc), str(log_path))
         return 1
     finally:
         if not args.no_pause:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 import paramiko
 
@@ -8,9 +9,10 @@ from ssh_tool.config import SshConfig, TargetOs
 
 
 class SshRemote:
-    def __init__(self, config: SshConfig) -> None:
+    def __init__(self, config: SshConfig, output: Callable[[str], None] = print) -> None:
         self.config = config
         self._client: paramiko.SSHClient | None = None
+        self.output = output
 
     def __enter__(self) -> "SshRemote":
         client = paramiko.SSHClient()
@@ -40,9 +42,9 @@ class SshRemote:
         stdout_text = decode_output(stdout.read(), self.config.output_encoding, self.config.target_os)
         stderr_text = decode_output(stderr.read(), self.config.output_encoding, self.config.target_os)
         if stdout_text:
-            print(stdout_text, end="")
+            self.output(stdout_text.rstrip("\n"))
         if stderr_text:
-            print(stderr_text, end="")
+            self.output(stderr_text.rstrip("\n"))
 
         return stdout.channel.recv_exit_status()
 

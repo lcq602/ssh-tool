@@ -10,7 +10,21 @@ uv run pyinstaller ^
   src\ssh_tool\main.py
 
 if errorlevel 1 (
-  echo Build failed.
+  echo CLI build failed.
+  pause
+  exit /b 1
+)
+
+uv run pyinstaller ^
+  --clean ^
+  --onefile ^
+  --windowed ^
+  --paths src ^
+  --name ssh-tool-gui ^
+  src\ssh_tool\flow_gui.py
+
+if errorlevel 1 (
+  echo GUI build failed.
   pause
   exit /b 1
 )
@@ -22,5 +36,6 @@ copy config\operations.txt dist\config\operations.txt >nul
 
 echo.
 echo Build complete: dist\ssh-tool.exe
+echo GUI complete: dist\ssh-tool-gui.exe
 echo Config copied to: dist\config
 pause
