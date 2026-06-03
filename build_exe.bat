@@ -5,6 +5,7 @@ cd /d "%~dp0"
 uv run pyinstaller ^
   --clean ^
   --onefile ^
+  --noconsole ^
   --paths src ^
   --name ssh-tool ^
   src\ssh_tool\main.py
