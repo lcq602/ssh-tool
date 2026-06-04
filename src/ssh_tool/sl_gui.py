@@ -8,7 +8,9 @@ Solo Leveling 风格浮动面板 GUI — SSH 工具图形界面
                        从队列读取消息并渲染到 GUI
 
 创建日期: 2026-06-03
-迭代: v1.0
+迭代: v2.0
+修改日期: 2026-06-04
+修改内容: 新增步骤列表面板 + 中英文双语言支持 + 运行步骤动画
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ import queue
 import tkinter as tk
 from tkinter import font as tkfont
 from typing import Callable
+
+from ssh_tool.l10n import L10n, get_l10n
 
 
 class GuiOutput:
@@ -81,9 +85,11 @@ class SoloLevelingGUI:
     TEXT_WHITE = "#e6edf3"
 
     WINDOW_W = 560
-    WINDOW_H = 380
+    WINDOW_H = 480
 
-    def __init__(self, msg_queue: queue.Queue) -> None:
+    SPINNER_CHARS = ["⟳", "/", "—", "\\"]
+
+    def __init__(self, msg_queue: queue.Queue, l10n: L10n | None = None) -> None:
         self.root = tk.Tk()
         self.root.title("SSH Tool")
         self.root.overrideredirect(True)
@@ -103,6 +109,14 @@ class SoloLevelingGUI:
         self._total_steps = 0
         self._progress_value = 0.0
 
+        # 语言支持
+        self._l10n = l10n or get_l10n()
+
+        # 步骤列表数据
+        self._steps: list[dict] = []
+        self._step_rotation_index = 0
+        self._running_step_index: int | None = None
+
         # 自定义字体
         self._font_cmd = tkfont.Font(family="Consolas", size=10)
         self._font_title = tkfont.Font(family="Microsoft YaHei UI", size=11, weight="bold")
@@ -110,6 +124,7 @@ class SoloLevelingGUI:
 
         self._create_widgets()
         self._poll_queue()
+        self.root.after(500, self._animate_step_icons)
 
     def _create_widgets(self) -> None:
         # ── 外层容器（带发光边框效果） ──
@@ -127,7 +142,7 @@ class SoloLevelingGUI:
         title_bar.bind("<B1-Motion>", self._on_drag)
 
         lbl_title = tk.Label(
-            title_bar, text="⚜  SYSTEM  ⚜",
+            title_bar, text=self._l10n.title,
             font=self._font_title, fg=self.TITLE_GOLD, bg=self.BG,
         )
         lbl_title.pack(side=tk.LEFT)
@@ -154,22 +169,47 @@ class SoloLevelingGUI:
                                                     fill=self.PROGRESS_START, outline="")
 
         self._conn_text = tk.Label(
-            self._conn_frame, text="◆  INITIALIZING",
+            self._conn_frame, text=self._l10n.initializing,
             font=self._font_status, fg=self.CMD_CYAN, bg=self.BG,
             anchor="w",
         )
         self._conn_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # ── 分隔线 ──
-        sep_frame = tk.Frame(self._main, bg=self.BG)
-        sep_frame.pack(fill=tk.X, padx=14, pady=(0, 4))
-        self._sep_label = tk.Label(
-            sep_frame, text="", font=self._font_cmd,
-            fg=self.OUTPUT_GRAY, bg=self.BG, anchor="w",
-        )
-        self._sep_label.pack(fill=tk.X)
+        # ── 步骤列表（可滚动） ──
+        self._step_container = tk.Frame(self._main, bg=self.BG)
+        self._step_container.pack(fill=tk.BOTH, expand=True, padx=14, pady=(2, 2))
 
-        # ── 日志输出区 ──
+        self._step_canvas = tk.Canvas(
+            self._step_container, bg=self.BG, highlightthickness=0,
+            bd=0, height=200,
+        )
+        self._step_scrollbar = tk.Scrollbar(
+            self._step_container, orient=tk.VERTICAL,
+            command=self._step_canvas.yview,
+        )
+        self._step_canvas.configure(yscrollcommand=self._step_scrollbar.set)
+
+        self._step_inner = tk.Frame(self._step_canvas, bg=self.BG)
+        self._step_canvas_window = self._step_canvas.create_window(
+            (0, 0), window=self._step_inner, anchor="nw", tags="inner"
+        )
+
+        def _configure_step_inner(event: tk.Event) -> None:
+            self._step_canvas.configure(scrollregion=self._step_canvas.bbox("all"))
+            self._step_canvas.itemconfig("inner", width=event.width)
+
+        self._step_inner.bind("<Configure>", _configure_step_inner)
+        self._step_canvas.bind("<Configure>", _configure_step_inner)
+
+        def _on_mousewheel(event: tk.Event) -> None:
+            self._step_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        self._step_canvas.bind("<MouseWheel>", _on_mousewheel)
+
+        self._step_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._step_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # ── 日志输出区（精简） ──
         self._log_text = tk.Text(
             self._main,
             font=self._font_cmd,
@@ -178,12 +218,12 @@ class SoloLevelingGUI:
             bd=0,
             padx=14,
             pady=4,
-            height=11,
+            height=4,
             state=tk.DISABLED,
             wrap=tk.WORD,
             highlightthickness=0,
         )
-        self._log_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=(0, 2))
+        self._log_text.pack(fill=tk.X, padx=2, pady=(2, 2))
 
         # 配置 Text 组件的彩色标签
         self._log_text.tag_configure("cmd", foreground=self.CMD_CYAN)
@@ -259,9 +299,10 @@ class SoloLevelingGUI:
             self._on_error(msg[1], msg[2])
         elif kind == "total_steps":
             self._total_steps = msg[1]
-            self._update_sep()
         elif kind == "progress":
             self._on_progress(msg[1], msg[2])
+        elif kind == "step_item":
+            self._on_step_item(msg[1], msg[2], msg[3])
 
     # ── 各消息处理 ──
     def _on_header(self, title: str) -> None:
@@ -269,29 +310,33 @@ class SoloLevelingGUI:
 
     def _on_connection(self, username: str, host: str, port: int, target_os: str) -> None:
         self._conn_text.configure(
-            text=f"◆  CONNECTING  ● {username}@{host}:{port} ({target_os})"
+            text=self._l10n.connecting.format(
+                user=username, host=host, port=port, os=target_os
+            )
         )
         self._conn_dot.itemconfigure(self._dot_id, fill=self.PROGRESS_START)
 
     def _on_info(self, message: str) -> None:
-        self._append_log(f">> {message}", "info")
+        self._append_log(self._l10n.log_info.format(msg=message), "info")
 
     def _on_line(self, message: str) -> None:
-        self._append_log(f"$ {message}", "cmd")
+        self._append_log(self._l10n.log_cmd.format(msg=message), "cmd")
 
     def _on_remote(self, text: str) -> None:
-        self._append_log(f"  {text}", "remote_out")
+        self._append_log(self._l10n.log_remote.format(text=text), "remote_out")
 
     def _on_success(self, message: str) -> None:
         self._conn_dot.itemconfigure(self._dot_id, fill=self.SUCCESS_GREEN)
-        self._status_label.configure(text=f"✓  {message}", fg=self.SUCCESS_GREEN)
+        self._status_label.configure(text=self._l10n.all_done, fg=self.SUCCESS_GREEN)
         self._append_log(f"✓ {message}", "success")
 
     def _on_error(self, message: str, log_path: str) -> None:
         self._conn_dot.itemconfigure(self._dot_id, fill=self.FAIL_RED)
-        self._status_label.configure(text=f"✗  {message}", fg=self.FAIL_RED)
-        self._append_log(f"✗ {message}", "error")
-        self._append_log(f"LOG: {log_path}", "error")
+        self._status_label.configure(
+            text=self._l10n.error_prefix.format(msg=message), fg=self.FAIL_RED
+        )
+        self._append_log(self._l10n.error_prefix.format(msg=message), "error")
+        self._append_log(self._l10n.log_error.format(path=log_path), "error")
 
     def _on_progress(self, current: int, total: int) -> None:
         fraction = current / total if total > 0 else 0.0
@@ -300,15 +345,86 @@ class SoloLevelingGUI:
         self._progress_canvas.coords(self._progress_fill_id, 0, 0, fill_w, 6)
         self._progress_value = fraction
         self._current_step = current
-        self._update_sep()
 
-    def _update_sep(self) -> None:
-        if self._total_steps > 0:
-            pct = int(self._progress_value * 100)
-            self._sep_label.configure(
-                text=f"────  STEP {self._current_step:02d}/{self._total_steps:02d}  ({pct}%)  ────"
+        # 更新步骤状态：前一步 → done，当前步 → running
+        if self._steps:
+            prev_idx = current - 2  # 0-indexed, current 是 1-indexed
+            run_idx = current - 1
+            if 0 <= prev_idx < len(self._steps):
+                self._steps[prev_idx]["status"] = "done"
+            if 0 <= run_idx < len(self._steps):
+                self._steps[run_idx]["status"] = "running"
+                self._running_step_index = run_idx
+            else:
+                self._running_step_index = None
+            self._rebuild_step_list()
+
+    # ── 步骤列表方法 ──
+    def _on_step_item(self, index: int, text: str, status: str) -> None:
+        """处理 step_item 消息：添加或更新步骤。"""
+        while len(self._steps) <= index:
+            self._steps.append({"text": "", "status": "pending"})
+
+        self._steps[index] = {"text": text, "status": status}
+        self._rebuild_step_list()
+
+    def _rebuild_step_list(self) -> None:
+        """根据 self._steps 数据重建所有步骤行。"""
+        for widget in self._step_inner.winfo_children():
+            widget.destroy()
+
+        colors = {
+            "pending": self.OUTPUT_GRAY,
+            "running": self.CMD_CYAN,
+            "done": self.SUCCESS_GREEN,
+            "error": self.FAIL_RED,
+        }
+
+        for i, step in enumerate(self._steps):
+            row = tk.Frame(self._step_inner, bg=self.BG)
+            row.pack(fill=tk.X, pady=(1, 1))
+
+            icon_text, _ = self._step_icon_and_color(step["status"])
+            fg_color = colors.get(step["status"], self.OUTPUT_GRAY)
+
+            lbl_icon = tk.Label(
+                row, text=icon_text, font=self._font_cmd,
+                fg=fg_color, bg=self.BG, width=3, anchor="w",
             )
+            lbl_icon.pack(side=tk.LEFT)
 
+            lbl_text = tk.Label(
+                row, text=step["text"], font=self._font_cmd,
+                fg=fg_color, bg=self.BG, anchor="w",
+            )
+            lbl_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            step["_icon_label"] = lbl_icon
+
+    @staticmethod
+    def _step_icon_and_color(status: str) -> tuple[str, str]:
+        icons_map = {
+            "pending": ("⏳", "#8b949e"),
+            "running": ("⟳", "#00bfff"),
+            "done": ("✅", "#00ff88"),
+            "error": ("❌", "#ff3333"),
+        }
+        return icons_map.get(status, ("⏳", "#8b949e"))
+
+    def _animate_step_icons(self) -> None:
+        """每 500ms 旋转当前运行步骤的图标。"""
+        if self._running_step_index is not None:
+            self._step_rotation_index = (self._step_rotation_index + 1) % len(self.SPINNER_CHARS)
+            char = self.SPINNER_CHARS[self._step_rotation_index]
+            if self._running_step_index < len(self._steps):
+                step = self._steps[self._running_step_index]
+                icon_label = step.get("_icon_label")
+                if icon_label:
+                    icon_label.configure(text=char)
+
+        self.root.after(500, self._animate_step_icons)
+
+    # ── 辅助方法 ──
     def _append_log(self, text: str, tag: str = "output") -> None:
         self._log_text.configure(state=tk.NORMAL)
         self._log_text.insert(tk.END, text + "\n", tag)
