@@ -1,5 +1,30 @@
 # 迭代日志
 
+## v2.2 — 2026-06-04
+
+### 修复
+- **上传路径解析**（`runner.py`）
+  - 修复 Windows 上 `\target\file.jar` 被当作盘符根目录的问题
+  - 相对路径现在基于 exe 所在目录或 CWD 解析
+- **失败时不闪退**
+  - 成功：3 秒后自动关闭窗口
+  - 失败：保留窗口，用户手动点 ✕ 关闭，方便查看错误信息
+
+### 新增
+- **`--skip-errors` 参数**
+  - 操作失败时跳过继续执行下一条
+  - 在日志中输出跳过的原因（⚠ SKIPPED: ...）
+  - CLI 和 GUI 模式均支持
+
+### 修改
+- `src/ssh_tool/main.py` — 新增 `_run_operations_skip_errors` 辅助函数; 修改 `_check_done` 逻辑
+- `src/ssh_tool/runner.py` — 新增 `_resolve_local_path` 解析上传路径
+
+### 测试
+- 全部 40 个测试通过
+
+---
+
 ## v2.1 — 2026-06-04
 
 ### 新增
