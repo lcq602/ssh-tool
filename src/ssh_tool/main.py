@@ -3,8 +3,8 @@ SSH Tool 主入口 — 支持 CLI / GUI 双模式
 =========================================
 
 修改日期: 2026-06-04
-迭代: v2.1
-修改内容: 双语言支持 + 步骤列表面板消息推送
+迭代: v2.2
+修改内容: 新增 --skip-errors 跳过失败继续执行; 失败时不自动关闭 GUI 窗口; 修复上传路径解析
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--operations", default="config/operations.txt", help="Operations text file.")
     parser.add_argument("--no-pause", action="store_true", help="Do not wait for Enter before exit.")
     parser.add_argument("--cli", action="store_true", help="Force CLI mode (no GUI).")
+    parser.add_argument("--skip-errors", action="store_true", help="Skip failed operations and continue.")
     args = parser.parse_args(argv)
 
     # ── 判断是否使用 GUI ──
@@ -46,6 +47,7 @@ def _run_cli(args: argparse.Namespace) -> int:
     """原有的控制台执行逻辑。"""
     log_path = create_log_file(Path.cwd())
     console = ConsoleOutput()
+    skip_errors = args.skip_errors
 
     try:
         console.header("SSH Tool")
@@ -59,7 +61,10 @@ def _run_cli(args: argparse.Namespace) -> int:
         append_log(log_path, f"Connecting to {ssh_config.username}@{ssh_config.host}:{ssh_config.port} ({ssh_config.target_os})")
         with SshRemote(ssh_config, output=console.remote) as remote:
             runner = OperationRunner(remote, target_os=ssh_config.target_os, output=console.line)
-            runner.run_all(operations)
+            if skip_errors:
+                _run_operations_skip_errors(runner, operations)
+            else:
+                runner.run_all(operations)
         console.success("All operations completed.")
         append_log(log_path, "All operations completed.")
         return 0
@@ -70,6 +75,37 @@ def _run_cli(args: argparse.Namespace) -> int:
     finally:
         if not args.no_pause:
             input("Press Enter to exit...")
+
+
+def _run_operations_skip_errors(runner: OperationRunner, operations: list[Operation]) -> None:
+    """跳过错误模式：逐条执行, 失败时记录原因并继续。"""
+    from ssh_tool.config import CommandOperation, UploadOperation
+
+    for op in operations:
+        try:
+            if isinstance(op, UploadOperation):
+                from pathlib import Path
+                resolved = _resolve_local_path(op.local_path)
+                runner.output(f"[line {op.line_number}] upload {resolved} -> {op.remote_path}")
+                runner.remote.upload(resolved, op.remote_path)
+            else:
+                runner._run_command(op)
+        except Exception as exc:
+            runner.output(f"[line {op.line_number}] ⚠ SKIPPED: {exc}")
+
+
+def _resolve_local_path(local_path: Path) -> Path:
+    """解析上传文件的本地路径 (适用于 --skip-errors 模式)。"""
+    import sys
+    from pathlib import Path as _Path
+
+    if local_path.exists():
+        return local_path
+    base = _Path(sys.executable).parent if getattr(sys, "frozen", False) else _Path.cwd()
+    candidate = base / local_path.name if local_path.parent == _Path() else base / local_path
+    if candidate.exists():
+        return candidate.resolve()
+    return local_path
 
 
 def _run_gui(args: argparse.Namespace) -> int:
@@ -83,10 +119,12 @@ def _run_gui(args: argparse.Namespace) -> int:
     gui = SoloLevelingGUI(msg_queue, l10n=l10n)
     gui_output = GuiOutput(msg_queue)
 
-    exit_code = [1]  # 用于跨线程传递结果
+    exit_code = [1]
+    skip_errors = args.skip_errors
 
     def worker() -> None:
         log_path = create_log_file(Path.cwd())
+        has_error = False
         try:
             gui_output.header(l10n.title)
             append_log(log_path, "SSH Tool started.")
@@ -95,13 +133,12 @@ def _run_gui(args: argparse.Namespace) -> int:
             ssh_config = load_ssh_config(ssh_config_path)
             operations = load_operations(operations_path)
 
-            # 告知 GUI 总步骤数 + 发送 step_item
+            # 发送 step_item 给所有操作
             gui_output.set_total_steps(len(operations))
             for i, op in enumerate(operations):
                 text = str(op.command) if isinstance(op, CommandOperation) else f"upload {op.local_path.name}"
                 gui_output.step_item(i, text, "pending")
 
-            # 标记第一个为 running
             if operations:
                 first_text = (
                     str(operations[0].command)
@@ -115,41 +152,55 @@ def _run_gui(args: argparse.Namespace) -> int:
             with SshRemote(ssh_config, output=gui_output.remote) as remote:
                 runner = OperationRunner(remote, target_os=ssh_config.target_os, output=gui_output.line)
                 for i, op in enumerate(operations, start=1):
-                    if isinstance(op, UploadOperation):
-                        gui_output.line(f"upload {op.local_path} -> {op.remote_path}")
-                        remote.upload(op.local_path, op.remote_path)
+                    try:
+                        if isinstance(op, UploadOperation):
+                            resolved = _resolve_local_path(op.local_path)
+                            gui_output.line(f"upload {resolved} -> {op.remote_path}")
+                            remote.upload(resolved, op.remote_path)
+                        else:
+                            runner._run_command(op)
+                    except Exception as exc:
+                        gui_output.error(f"[SKIP] {exc}", str(log_path))
+                        gui_output.step_item(i - 1, "", "error")
+                        has_error = True
+                        if not skip_errors:
+                            raise
                     else:
-                        runner._run_command(op)
-                    gui_output.update_progress(i, len(operations))
+                        gui_output.update_progress(i, len(operations))
+                        if i < len(operations):
+                            next_op = operations[i]
+                            next_text = (
+                                str(next_op.command)
+                                if isinstance(next_op, CommandOperation)
+                                else f"upload {next_op.local_path.name}"
+                            )
+                            gui_output.step_item(i, next_text, "running")
 
-                    # 标记下一步为 running
-                    if i < len(operations):
-                        next_op = operations[i]
-                        next_text = (
-                            str(next_op.command)
-                            if isinstance(next_op, CommandOperation)
-                            else f"upload {next_op.local_path.name}"
-                        )
-                        gui_output.step_item(i, next_text, "running")
-
-            gui_output.success(l10n.all_done)
-            append_log(log_path, "All operations completed.")
-            exit_code[0] = 0
+            if has_error:
+                gui_output.info(l10n.log_info.format(msg="Some operations were skipped due to errors"))
+                append_log(log_path, "Completed with errors (skip-errors mode).")
+                exit_code[0] = 1
+            else:
+                gui_output.success(l10n.all_done)
+                append_log(log_path, "All operations completed.")
+                exit_code[0] = 0
         except Exception as exc:
             write_failure_log(log_path, exc)
             gui_output.error(str(exc), str(log_path))
             exit_code[0] = 1
         finally:
-            # 发送结束信号，让 GUI 知道工作线程已结束
+            # 发送结束信号
             msg_queue.put(("_done",))
 
-    # 检测 done 信号，延迟关闭窗口
+    # 检测 done 信号：成功则 3s 后关, 失败则保留窗口
     def _check_done() -> None:
         try:
             while True:
                 msg = msg_queue.get_nowait()
                 if msg[0] == "_done":
-                    gui.root.after(3000, gui.root.destroy)
+                    if exit_code[0] == 0:
+                        gui.root.after(3000, gui.root.destroy)
+                    # 失败时不关窗口, 用户手动点 ✕ 关闭
                     return
         except queue.Empty:
             pass
@@ -159,7 +210,6 @@ def _run_gui(args: argparse.Namespace) -> int:
     t = threading.Thread(target=worker, daemon=True)
     t.start()
 
-    # 启动后台检测 done
     gui.root.after(100, _check_done)
 
     gui.run()
