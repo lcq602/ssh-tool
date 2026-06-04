@@ -1,3 +1,15 @@
+"""
+l10n 语言支持模块 — 中英文双语言
+==================================
+
+提供 L10n frozen dataclass 管理所有 UI 字符串,
+detect_language() 自动检测系统语言,
+get_l10n() 工厂函数按语言返回对应字符串表。
+
+创建日期: 2026-06-04
+迭代: v1.0
+"""
+
 from __future__ import annotations
 
 import locale
