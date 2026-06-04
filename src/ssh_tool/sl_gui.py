@@ -53,6 +53,16 @@ class GuiOutput:
     def update_progress(self, current: int, total: int) -> None:
         self._queue.put(("progress", current, total))
 
+    def step_item(self, index: int, text: str, status: str) -> None:
+        """添加一个步骤项到队列。
+
+        Args:
+            index: 步骤序号。
+            text:  步骤描述文本。
+            status: 步骤状态, 可选 "pending" / "running" / "done" / "error"。
+        """
+        self._queue.put(("step_item", index, text, status))
+
 
 class SoloLevelingGUI:
     """Solo Leveling 风格浮动面板。"""
@@ -81,11 +91,11 @@ class SoloLevelingGUI:
         self.root.attributes("-topmost", True)
         self.root.resizable(False, False)
 
-        # 定位到右下角
+        # 居中显示
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        x = sw - self.WINDOW_W - 20
-        y = sh - self.WINDOW_H - 60
+        x = (sw - self.WINDOW_W) // 2
+        y = (sh - self.WINDOW_H) // 2
         self.root.geometry(f"{self.WINDOW_W}x{self.WINDOW_H}+{x}+{y}")
 
         self._queue = msg_queue
